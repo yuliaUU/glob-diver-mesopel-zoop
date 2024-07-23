@@ -1,0 +1,2330 @@
+---
+title: "Global Diversity of Mesopelagic Mesozooplankton"
+output: html_document
+date: '2022-07-15'
+---
+
+```{r lib, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(readr)
+library(dplyr)
+library(glue)
+library(latex2exp)
+library(sp)
+library(scales)
+library(tidyr)
+library(tidyverse)
+library(data.table)
+library(biscale)
+library(cowplot)
+library(ggpubr)
+library(janitor)
+library(sf)
+library(patchwork)
+
+# custom functions
+`%notin%` <- Negate(`%in%`)
+select=dplyr::select
+rename=dplyr::rename
+filter=dplyr::filter
+summarize=dplyr::summarize
+count=dplyr::count
+drop_na=tidyr::drop_na
+group_by=dplyr::group_by
+mutate=dplyr::mutate
+```
+
+```{r nice-theme}
+source(here::here("fun/theme_Publication.R"))
+```
+```{r include=FALSE}
+# from https://www.r-bloggers.com/2016/04/map-of-the-windows-fonts-registered-with-r/
+# to load fonts:
+#extrafont::font_import()
+# Register fonts for Windows bitmap output
+extrafont::loadfonts(device = "win")
+```
+
+```{r plt-map-fun}
+my.colors=c("#313695","#4575b4","#74add1","#abd9e9","#e0f3f8","#ffffbf","#fee090","#fdae61","#f46d43","#d73027","#a50026")
+#my.colors = colorRampPalette(c("#2c7bb6","#ffffbf","#d7191c"))(11)
+plot.map<- function(NE_places.df, continious=TRUE,alpha = 0.5, size = 1){
+  names(NE_places.df) <- c("lon", "lat","PROB")
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+plt<- ggplot() +
+  # add locations (points); add opacity with "alpha" argument
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, colour = PROB),size = size, 
+             alpha = alpha) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  # add projected bounding box
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  # add graticules
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", linewidth = .25) +
+  # add graticule labels - latitude and longitude
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  # __ Set aspect ratio
+  coord_fixed(ratio = 1) +
+  # __ Set empty theme
+  theme_void(base_size=12, base_family="Times New Roman") + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(0,0,0,0),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+if (continious==FALSE) {
+  plt
+}else{
+  plt+scale_color_gradientn(colours = my.colors,#RColorBrewer::brewer.pal(11, 'Spectral')[11:1],
+                                                   guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+}
+  
+}
+
+scale_fill_Publication <- function(...){
+  library(scales)
+  discrete_scale("fill","Publication",manual_pal(values = c("#386cb0","#fdb462","#7fc97f","#ef3b2c","#662506","#a6cee3","#fb9a99","#984ea3","#ffff33","darkgreen")), ...)
+  
+}
+
+scale_colour_Publication <- function(...){
+  library(scales)
+  discrete_scale("colour","Publication",manual_pal(values = c("#386cb0","#fdb462","#7fc97f","#ef3b2c","#662506","#a6cee3","#fb9a99","#984ea3","#ffff33","darkgreen")), ...)
+  
+}
+
+```
+```{r ltg-plot-fun}
+ltg<- function(df){
+  df |> 
+  ggplot()+
+  geom_point(aes(latitude, total, color=total))+
+    
+ scale_y_continuous(breaks = scales::pretty_breaks(n = 5))+
+  stat_summary(aes(latitude, total, color=total), fun.y=mean, geom="line", colour="black")+
+  
+    
+  #theme(legend.position = "none")+
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90),
+        legend.title.align = 0.5)+
+  scale_x_continuous(breaks= c(-60,-30,0,30,60),
+                              labels=c("60°S","30°S","0","30°N","60°N"),
+                              limits=c(-80,90) )+
+  coord_flip()+
+  theme_Publication()+
+
+    scale_color_gradientn(colours = my.colors,#RColorBrewer::brewer.pal(11, 'Spectral')[11:1],
+                        guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))+
+  theme(legend.position = "right",
+            legend.key.size= unit(0.2, "cm"),
+            legend.spacing = unit(0, "cm"),
+            legend.title = element_text(face="bold",angle = 90),
+        legend.title.align = 0.5)
+}
+```
+
+
+```{r plot.map2D}
+plot.map2D<- function(dt2D, dim=4,  xlab = "species richness",ylab = "total rarity", pal= "BlueYl"){
+  dim=dim
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+# NE_places.df.prj  <- project(cbind(NE_places.df$lon, NE_places.df$lat), proj = PROJ) |> data.frame()
+# names(NE_places.df.prj)[1:2] <- c("X.prj","Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = xlab,
+                    ylab = ylab,
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+}
+```
+# 1. Load Data
+```{r data}
+load("rds/map.RData")
+GEO <- read_csv("data/GEO.csv",show_col_types=FALSE)
+grid=GEO[, c("longitude","latitude","ProvId")]
+# meta datat for zoopl
+META_zoop <- read_csv("data/META_zoop.csv",show_col_types=FALSE)
+# files with Native Range that can do SDM
+files <- META_zoop |>  filter(ModelStatus =="SDM",  Env %notin% c("EPI", "NEITHER")) |> pull(SPID)
+# __ give the PORJ.4 string for Eckert IV projection
+PROJ <- "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs" 
+n_phylum <- META_zoop |>  filter(ModelStatus=="SDM", Env %in% c("MESO","BOTH")) |> tabyl(phylum) |> mutate(phylum_label= glue::glue("{phylum} (n={n})")) |> select(phylum, phylum_label) |> 
+  rbind(data.frame(phylum="All species", phylum_label= glue::glue("All species (n={length(files)})")))
+```
+```{r}
+#load occur data
+ENSEMBLE_occ.wmean <- read_csv("data/ENSEMBLE_occ.wmean.csv")
+ENSEMBLE_occ.wmean.tot<- read_csv("data/ENSEMBLE_occ.wmean.tot.csv")
+
+max.sp_lat <- ENSEMBLE_occ.wmean |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+# Sampling effort
+effort.infer<- read_csv( "data/sampling-effort.csv",show_col_types = FALSE) |> 
+  rename(n_samples_obs=total, num_sp_obs=total_occ1) |>  
+  left_join(ENSEMBLE_occ.wmean.tot)  |> rename(num_sp_pred=total) |> 
+  mutate(effort=num_sp_obs/num_sp_pred)
+```
+
+
+
+```{r ENV}
+# Load Mesopelagic Data
+load(here::here("rds/Temp.RData"))
+Temp
+#Std Dev Temp
+load("rds/Temp_mean_sd.RData")
+MESO
+```
+
+### Unfiltered Data
+
+```{r}
+## Not Filtered data
+sp.importance <- ENSEMBLE_occ.wmean |>
+  group_by(longitude, latitude, ProvId) |> 
+  pivot_longer(-c("longitude","latitude","ProvId")) |> filter(value>0)|> 
+  group_by(name) |> 
+  # number of cells for each species
+  mutate(N=n()) |> 
+  ungroup() |> #mutate(p=N/nrow(grid))
+  # proportion of distribution of each sp found in a given cell
+  mutate(R=value/N) # equivalent to 1/N
+
+dt<- sp.importance |> 
+  group_by(latitude, longitude, ProvId) |>
+  # weighted endemism
+  summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |> 
+  ungroup() |> 
+  right_join(grid, by = c("latitude", "longitude","ProvId")) |> 
+  drop_na(ProvId) |> 
+  select(longitude, latitude, sum)|> 
+  mutate(sum=scales::rescale(sum))|> 
+  drop_na()
+
+dt1 <- sp.importance |> group_by(latitude, longitude, ProvId) |>
+  summarize(sum = sum(R, na.rm = TRUE) / n(),
+            .groups = "keep") |> 
+  ungroup() |> 
+  right_join(grid, by = c("latitude", "longitude", "ProvId")) |> 
+  drop_na(ProvId) |>
+  select(longitude, latitude, sum) |> 
+  mutate(sum = scales::rescale(sum)) |> 
+  drop_na()
+# save data
+# write_csv(dt, "data/total-range-size-rarity.csv")
+# write_csv(dt1, "data/avrg-size-rarity.csv")
+
+diver_biom<- ENSEMBLE_occ.wmean.tot |> rename(SR =total) |> # number of species per lat/lon
+  left_join(grid|>  select("longitude","latitude","ProvId"))|>
+  left_join(dt|>  rename(tot_rar=sum))|>
+  left_join(dt1|>  rename(avrg_rar=sum))|> 
+  mutate(
+    basin = case_when(
+      ProvId %in% c(1) ~ "Arctic",
+      ProvId %in% c(2, 3, 4, 5, 6, 11, 12) ~ "North Pacific",
+      ProvId %in% c(7, 8, 9 , 10, 13) ~ "South Pacific",
+      ProvId %in% c(14, 15, 16, 17, 18, 19, 20) ~ "Indian Ocean",
+      ProvId %in% c(21, 22, 23, 24, 25, 26) ~ "North Atlantic",
+      ProvId %in% c(27, 28, 29, 30) ~ "South Atlantic",
+      ProvId %in% c(31, 32, 33) ~ "Southern Ocean",
+    )) 
+
+diver_biom
+```
+
+
+### Filtered Data
+
+```{r}
+# Filtered data : 2 species from S. Pacific
+sp.importance.fil <- ENSEMBLE_occ.wmean |>
+  group_by(longitude, latitude, ProvId) |> 
+  pivot_longer(-c("longitude","latitude","ProvId")) |> filter(value>0)|> 
+  filter(name %notin% c("Allosergestes.pestafer_wmean", "Echinomysis.serratus_wmean")) |>
+  group_by(name) |> 
+  # number of cells for each species
+  mutate(N=n()) |> 
+  ungroup() |> #mutate(p=N/nrow(grid))
+  # proportion of distribution of each sp found in a given cell
+  mutate(R=value/N) # equivalent to 1/N
+
+# total rarity
+dt.fil<- sp.importance.fil |> 
+  group_by(latitude, longitude, ProvId) |>
+  # weighted endemism
+  summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |> 
+  ungroup() |> 
+  right_join(grid, by = c("latitude", "longitude","ProvId")) |> 
+  drop_na(ProvId) |> 
+  select(longitude, latitude, sum)|> 
+  mutate(sum=scales::rescale(sum))|> 
+  drop_na()
+
+# avrg rarity
+dt1.fil <- sp.importance.fil |> 
+  group_by(latitude, longitude, ProvId) |>
+  summarize(sum = sum(R, na.rm = TRUE) / n(),
+            .groups = "keep") |> 
+  ungroup() |> 
+  right_join(grid, by = c("latitude", "longitude", "ProvId")) |> 
+  drop_na(ProvId) |>
+  select(longitude, latitude, sum) |> 
+  mutate(sum = scales::rescale(sum)) |> 
+  drop_na()
+
+# save data
+# write_csv(dt.fil, "data/total-range-size-rarity-FILTERED.csv")
+# write_csv(dt1.fil, "data/avrg-size-rarity-FILTERED.csv")
+
+diver_biom.fil<- ENSEMBLE_occ.wmean.tot |> rename(SR =total) |> # number of species per lat/lon
+  left_join(grid|>  select("longitude","latitude","ProvId"))|>
+  left_join(dt.fil |>  rename(tot_rar=sum))|>
+  left_join(dt1.fil |>  rename(avrg_rar=sum))|> 
+  mutate(
+    basin = case_when(
+      ProvId %in% c(1) ~ "Arctic",
+      ProvId %in% c(2, 3, 4, 5, 6, 11, 12) ~ "North Pacific",
+      ProvId %in% c(7, 8, 9 , 10, 13) ~ "South Pacific",
+      ProvId %in% c(14, 15, 16, 17, 18, 19, 20) ~ "Indian Ocean",
+      ProvId %in% c(21, 22, 23, 24, 25, 26) ~ "North Atlantic",
+      ProvId %in% c(27, 28, 29, 30) ~ "South Atlantic",
+      ProvId %in% c(31, 32, 33) ~ "Southern Ocean",
+    )) 
+
+diver_biom.fil
+```
+
+
+
+
+
+
+
+# 2. SR
+
+```{r  fig.height=5, fig.width=12, warning=FALSE}
+ldg_UR<- ENSEMBLE_occ.wmean.tot[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+#ggsave("img/LDG_SR/mapSR_UR.mean.png", width=29.7, height=14, units="cm", dpi=300)
+#ggsave("img/LDG_SR/LDG_SR_UR.png", width=12, height=14, units="cm", dpi=300)
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+sr_patch
+#ggsave("img/mapSRvsLDG_UR.mean.png", width=27, height=12, units="cm", dpi=300)
+```
+
+# 3. Rarity Maps + LDG
+
+## Unfiltered
+
+
+```{r rarity, fig.height=5, fig.width=12, warning=FALSE}
+# total range-size rarity
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")+
+    scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")+
+    scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1.))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+tot_rarity_patch
+
+# Average range-size rarity
+avrg_rarity<- plot.map(dt1)+labs(color="Average range-size rarity")+
+    scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")+      scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+avrg_rarity_patch<-avrg_rarity+ 
+  theme(legend.position="none") + 
+  ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1.))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+avrg_rarity_patch
+
+```
+
+- The Jenks optimization method, also called the Jenks natural breaks classification method, is a data clustering method designed to determine the best arrangement of values into different classes. This is done by seeking to minimize each class's average deviation from the class mean, while maximizing each class's deviation from the means of the other classes. In other words, the method seeks to reduce the variance within classes and maximize the variance between classes.[
+- Classes can be applied with the style parameter using four approaches for calculating breaks: "quantile" (default), "equal", "fisher", and "jenks". The default "quantile" approach will create relatively equal “buckets” of data for mapping, with a break created at the median (50th percentile) for a two-by-two map or at the 33rd and 66th percentiles for a three-by-three map. For a four-by-four map, breaks are created at the 25th, 50th (median), and 75th percentiles. 
+
+
+```{r 2D, fig.width=12}
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot[, c(1,2,4)], dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+SR_TotRar_2D <- plot.map2D(dt2D, dim=4,  xlab = "species richness",ylab = "total rarity")
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+SR_AvrgRar_2D<- plot.map2D(dt2D, dim=4,  xlab = "species richness",ylab = "average rarity")
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+patch2D
+```
+
+### All plots combined
+```{r FigureS2, fig.height=20, fig.width=15, warning=FALSE}
+FigureS2<-(tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+FigureS2
+ggsave("img/FigureS8.png", width=15, height=20, units="in", dpi=300)
+```
+
+## Filtered
+
+Removed 2 sp Pacific Gyre
+
+
+```{r rarity-fil, fig.height=5, fig.width=12}
+# total range-size rarity
+tot_rarity.fil<- plot.map(dt.fil )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity.fil<- dt.fil  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch.fil<- tot_rarity.fil+ theme(legend.position="none") + ldg_tot_rarity.fil+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+tot_rarity_patch.fil
+
+# Average range-size rarity
+avrg_rarity.fil<- plot.map(dt1.fil)+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity.fil<- dt1.fil  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch.fil<-avrg_rarity.fil+ theme(legend.position="none") + ldg_avrg_rarity.fil+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+avrg_rarity_patch.fil
+
+```
+
+
+Filtered total range-size rarity map (rarity values >0.7 were removed
+```{r FigureS3, fig.height=5, fig.width=12}
+# total range-size rarity
+tot_rarity.filtered<- plot.map(dt.fil |> filter(sum<0.7) )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity.filtered<- dt.fil  |> rename(total=sum) |> filter(total<0.7)|> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+FigureS3<- tot_rarity.filtered+ theme(legend.position="none") + ldg_tot_rarity.filtered+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+FigureS3
+
+ggsave("img/FigureS9.png",plot=FigureS3, width=12, height=5, units="in", dpi=300)
+```
+
+
+- The Jenks optimization method, also called the Jenks natural breaks classification method, is a data clustering method designed to determine the best arrangement of values into different classes. This is done by seeking to minimize each class's average deviation from the class mean, while maximizing each class's deviation from the means of the other classes. In other words, the method seeks to reduce the variance within classes and maximize the variance between classes.[
+- Classes can be applied with the style parameter using four approaches for calculating breaks: "quantile" (default), "equal", "fisher", and "jenks". The default "quantile" approach will create relatively equal “buckets” of data for mapping, with a break created at the median (50th percentile) for a two-by-two map or at the 33rd and 66th percentiles for a three-by-three map. For a four-by-four map, breaks are created at the 25th, 50th (median), and 75th percentiles. 
+
+```{r 2D-fil, fig.height=5, fig.width=12, warning=FALSE}
+
+dt2D.fil <- full_join(ENSEMBLE_occ.wmean.tot[, c(1,2,4)], dt.fil, by = c("longitude", "latitude")) |> drop_na(sum,total)
+SR_TotRar_2D.fil <- plot.map2D(dt2D.fil, dim=4,  xlab = "species richness",ylab = "total rarity")
+
+dt2D.fil <- full_join(ENSEMBLE_occ.wmean.tot[, c(1,2,4)],dt1.fil, by = c("longitude", "latitude")) |> drop_na(sum, total)
+SR_AvrgRar_2D.fil<- plot.map2D(dt2D.fil, dim=4,  xlab = "species richness",ylab = "average rarity")
+
+patch2D.fil <- SR_TotRar_2D.fil + SR_AvrgRar_2D.fil+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -2, vjust = 1.5))
+patch2D.fil
+```
+
+### All Plots together
+```{r Figure1, fig.height=15, fig.width=15, warning=FALSE}
+Figure1<-(sr_patch /
+tot_rarity_patch.fil /
+avrg_rarity_patch.fil ) +
+  plot_layout(heights = c(1, 1, 1))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+Figure1
+ggsave("img/Figure1.png", width=30, height=42, units="cm", dpi=300)
+```
+
+```{r Figure2, fig.height=5, fig.width=15, warning=FALSE}
+Figure2<-SR_TotRar_2D.fil + SR_AvrgRar_2D.fil+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -2, vjust = 1.5))
+Figure2
+ggsave("img/Figure2.png", width=15, height=5, units="in", dpi=300)
+```
+
+
+
+# 4. Metabolic Theory Plots
+## Filtered
+
+
+The strong role of temperature is consistent with the metabolic 
+theory of ecology (12), but while this theory implies a single negative 
+and linear relationship with a slope of −0.32 between logarithmic 
+species richness and inverse thermal energy (22, 23),
+```{r Figure3, fig.height=6, fig.width=6}
+# data frame with temperature, species richness, and hemisphere information
+data <-  diver_biom.fil |>  left_join(Temp, by = c("longitude", "latitude")) |>
+  mutate(lat = ifelse(latitude < 0, "Southern Hemisphere", "Northern Hemisphere")) |>
+  select(avrg_rar,
+         Temperature = Temp,
+         SR = SR,
+         Hemisphere = lat,
+         avrg_rar)
+
+# calculate ln(SR) and inverse thermal energy in eV^-1
+data$ln_SR <- log(data$SR)
+data$ln_avrg_rar <- log(data$avrg_rar)
+k <- 8.617333262145e-05 # Boltzmann constant in eV/K
+data$inv_kT <- 1 / (k * (data$Temperature + 273.15))
+
+
+text <- data |> drop_na(Temperature) |>
+  mutate(areas = case_when(Temperature < 5 ~ "left",
+                           Temperature < 19 ~ "middle",
+                           TRUE ~ "right")) |> tabyl(areas) |> as.data.frame() |>
+  mutate(
+    x = c(1, 12, 23),
+    x = 1 / (k * (x + 273.15)),
+    y = 0.7,
+    area = paste0(round(percent * 100, 0), "% area")
+  )
+
+# ggplot with geom_point
+Figure3<-ggplot(data, aes(x = inv_kT, y = ln_SR, group = Hemisphere)) +
+    geom_vline(xintercept = 1 / (k * (5 + 273.15)), color="grey")+
+  geom_vline(xintercept = 1 / (k * (19 + 273.15)), color="grey")+
+  geom_point(aes(color = Hemisphere),alpha=0.05, size=1, show.legend = F) +
+    geom_abline(slope = 0.70, intercept=32.72, linetype = "dashed")+ # slope should be - -> but we reverse the scale
+  scale_y_continuous(name = "ln(SR)") +
+  labs(color = "Hemisphere") +
+  theme_classic() +
+  theme(legend.position = "right") +
+   # add a secondary x axis with temperature in Celsius
+  scale_x_reverse(sec.axis=sec_axis(trans=~ (1/.)/k-273.15, name="Temperature (°C)",
+                                    breaks=pretty_breaks(n=5)))+
+  scale_y_continuous(breaks=pretty_breaks(n=5))+
+  labs(x=TeX(r'(\textbf{Inverse Thermal Energy $(eV^{-1})$})'))+
+  scale_color_manual(values=c("#ffe169","#4893c6"))+
+  ggnewscale::new_scale_color() +
+  geom_smooth(method = "loess", span=0.5, se=FALSE, aes(color=Hemisphere))+
+   scale_color_manual(values=c("#cc9c00","#054a91"))+
+  labs(y='Species Richness (ln)')+
+  geom_text(data = text, aes(x, y, label =area),inherit.aes = FALSE)+
+  theme_Publication()+ 
+  theme(legend.position = c(0.85, 0.335))
+Figure3
+ggsave("img/Figure3.png", width=6, height=6, units="in", dpi=300)
+```
+
+
+# 5. SR vsTemp
+
+## Filtered
+```{r T_SR}
+T_SR.plt <- diver_biom.fil |> left_join(Temp, by = c("longitude", "latitude")) |>
+  select(Temp,SR,avrg_rar) |> 
+  drop_na() |> 
+ arrange(avrg_rar) |> 
+  ggplot(aes(x=Temp, y=SR, color=avrg_rar)) +
+  geom_point(alpha=0.5)+
+  scale_color_gradientn(colours = my.colors,
+                        #trans="log10",
+                        guide = guide_colourbar(title.position = "left",
+                      barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))+
+ 
+  theme_Publication()+
+  geom_smooth(color="black",method = "loess", se=FALSE)+
+  theme(legend.position = "right",
+            legend.key.size= unit(0.2, "cm"),
+            legend.spacing = unit(0, "cm"),
+            legend.title = element_text(face="bold",angle = 90),
+        legend.title.align = 0.5)+
+   labs(x="Temperature (°C)", y="Species Richness", color="Average range-size rarity")+
+  scale_x_continuous(breaks = pretty_breaks(n=10))
+
+
+
+Tsd_map <-diver_biom.fil |> left_join(MESO, by = c("longitude", "latitude")) |> 
+  select(longitude, latitude, Tsd) |>
+  plot.map()+
+  labs(color="Temperature Std Dev")
+
+
+Tsd_SR.plt <- diver_biom.fil |> left_join(MESO, by = c("longitude", "latitude"))|>
+  rename(Temp=Tsd) |> 
+  select(Temp,SR,Tmean) |> 
+  drop_na() |> 
+ #arrange(Tmean) |> 
+  ggplot(aes(x=Tmean, y=SR, color=Temp)) +
+  geom_point(alpha=0.5)+
+  scale_color_gradientn(colours = my.colors,
+                        #trans="log10",
+                        guide = guide_colourbar(title.position = "left",
+                      barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))+
+  theme_Publication()+
+  geom_smooth(color="black",method = "loess", se=FALSE)+
+  theme(legend.position = "right",
+            legend.key.size= unit(0.2, "cm"),
+            legend.spacing = unit(0, "cm"),
+            legend.title = element_text(face="bold",angle = 90),
+        legend.title.align = 0.5)+
+   labs(x="Temperature (°C)", y="Species Richness", color="Temperature Std Dev")+
+  scale_x_continuous(breaks = pretty_breaks(n=10))#+
+ # scale_y_log10()
+
+```
+
+```{r FigureS4,fig.height=12, fig.width=15}
+FigureS4<-(T_SR.plt | Tsd_SR.plt) / Tsd_map +
+  plot_layout(heights = c(1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+FigureS4
+ggsave("img/FigureS4.png", width=15, height=12, units="in", dpi=300)
+```
+
+
+
+# 6. Sampling effort
+
+```{r }
+# Num of SR effort
+effort2<-plot.map(effort.infer|>  select(longitude, latitude, num_sp_obs) |>  drop_na() |> arrange(num_sp_obs),alpha=0.5)+
+  labs(color="Number of Obs Species (sqrt)")+
+  scale_color_gradientn(colours = my.colors,
+                        trans="sqrt",
+                        guide = guide_colourbar(title.position = "left", barwidth = 0.5,barheight = 10,ticks = TRUE,nbin = 10)) 
+
+#ggsave("img/sampling-effort_num_sp.png", width=29.7, height=14, units="cm", dpi=300)
+
+### LDG Rarirty vs Effort 
+bias.df<- left_join(effort.infer, diver_biom.fil) |>  
+  select(-num_sp_pred, -effort,  -basin) |>  drop_na()
+
+bias_lat<- bias.df |>  group_by(latitude) |> 
+  summarize(mean_sp= mean(num_sp_obs, na.rm=TRUE),
+            sd_sp= sd(num_sp_obs, na.rm=TRUE),
+            mean_samples= mean(n_samples_obs, na.rm=TRUE),
+            sd_ssamples= sd(n_samples_obs, na.rm=TRUE))
+
+p1<- ldg_avrg_rarity.fil+
+  theme(legend.position = "none")
+
+p2<- ggplot(bias.df,aes(y=num_sp_obs, x=latitude))+ 
+  geom_point(color="grey")+
+  labs(x=NULL)+
+  stat_summary( fun=mean, geom="line", colour="darkblue")+
+  geom_smooth(method ="loess", se=TRUE)+
+  scale_y_log10()+
+  coord_flip()+
+  theme_Publication()+
+  labs(y= "Number of observed species")+
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90),
+        legend.title.align = 0.5)+
+  scale_x_continuous(breaks= c(-60,-30,0,30,60),
+                              labels=c("60°S","30°S","0","30°N","60°N"),
+                              limits=c(-80,90) )+ 
+  theme(axis.ticks.y = element_blank(),
+        axis.text.y = element_blank())
+
+```
+```{r FigureS12, fig.height=12, fig.width=15, warning=FALSE}
+# plot_grid(plot_grid(p1, p2, ncol=2,labels = "AUTO"), plot_grid(effort2, labels = "C"), ncol=1)
+FigureS12<-(p1 | p2) / effort2 +
+  plot_layout(heights = c(1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+FigureS12
+ggsave("img/FigureS12.png", width=15, height=12, units="in", dpi=300)
+```
+
+
+# 7. ENV Maps
+
+```{r}
+load(here::here("rds/ENV.RData"))
+```
+
+```{r FigureS1, fig.height=10, fig.width=11}
+#MESO
+
+FigureS12<-cowplot::plot_grid(
+plot.map(MESO |> select(longitude,latitude, Temp))+labs(color="Temp"),
+plot.map(MESO |> select(longitude, latitude, Sal) |> filter(Sal>25)) + labs(color = "Sal") +
+  scale_color_gradientn(
+    colours = my.colors,
+    trans="log10",
+    guide = guide_colourbar(
+      title.position = "left",
+      barwidth = 0.5,
+      barheight = 10,
+      ticks = TRUE,
+      nbin = 10
+    )
+  ) ,
+plot.map(MESO |> select(longitude,latitude, O2))+labs(color="O2"),
+plot.map(MESO |> select(longitude,latitude, NO3))+labs(color="NO3"),
+plot.map(MESO |> select(longitude,latitude, MLD))+labs(color="MLD"),
+plot.map(MESO |> select(longitude,latitude, Zeu))+labs(color="Zeu"),
+plot.map(MESO |> select(longitude,latitude, NPP))+labs(color="NPP"), labels = "AUTO", ncol = 2
+)
+FigureS12
+ggsave("img/FigureS12.png", width=29.7, height=25, units="cm", dpi=300)
+```
+
+# 8. Plots per Phylum
+```{r}
+sums = function(dd){
+  # remove rows that had empty values  in all species columns
+  dd1= dd[rowSums(is.na(dd[,-c(1:3)])) != ncol(dd[,-c(1:3)]), ]
+  coord=dd1[,1:3]
+  total=rowSums(dd1[,-c(1:3)], na.rm =TRUE)
+  return(cbind(coord,total))
+}
+```
+
+
+
+
+## Annelida -quantile (dim=2)
+
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Annelida") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+sp2<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Annelida") |> mutate(col_names=paste0(name,"_HSIwmean")) |> pull(col_names)
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,all_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS5, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+```
+
+
+```{r , fig.height=20, fig.width=15}
+dim=2
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "equal", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS1.png", width=30, height=42, units="cm", dpi=300)
+```
+## Arthropoda -quantile
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Arthropoda") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS6, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")+     
+  scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")+     
+  scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")+     
+  scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")+     
+  scale_colour_gradientn(colours =  my.colors,
+    trans="sqrt",
+    guide = guide_colourbar(
+                          title.position = "left",  barwidth=0.5,barheight=10,ticks=TRUE,
+                          nbin = 10))
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+
+dim=4
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS2.png", width=30, height=42, units="cm", dpi=300)
+```
+## Chaetognatha-quantile(dim=2)
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Chaetognatha") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS7, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+
+dim=2
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS3.png", width=30, height=42, units="cm", dpi=300)
+```
+## Chordata-equal(dim=3)
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Chordata") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS8, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+dim=3
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "equal", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "equal", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS4.png", width=30, height=42, units="cm", dpi=300)
+```
+## Cnidaria-quantile
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Cnidaria") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS9, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+dim=4
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS5.png", width=30, height=42, units="cm", dpi=300)
+```
+## Ctenophora- equal (dim=3)
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Ctenophora") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS10, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> 
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+dim=3
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "equal", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "equal", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS6.png", width=30, height=42, units="cm", dpi=300)
+```
+
+## Mollusca-quantile
+```{r}
+sp1<- META_zoop |>  select(name, phylum) |>  filter(phylum=="Mollusca") |> mutate(col_names=paste0(name,"_wmean")) |> pull(col_names)
+
+
+ENSEMBLE_occ.wmean1<-ENSEMBLE_occ.wmean |> select(longitude,latitude,ProvId,any_of(sp1))
+ENSEMBLE_occ.wmean.tot1 <- sums(ENSEMBLE_occ.wmean1)|> drop_na(ProvId)
+
+```
+
+```{r FigureS11, fig.height=20, fig.width=15}
+max.sp_lat <- ENSEMBLE_occ.wmean1 |> pivot_longer(-c("longitude","latitude", "ProvId")) |> 
+  filter(value>=1) |> 
+  group_by(latitude) |>
+  summarise(count = n_distinct(name),.groups = "keep")
+
+ldg_UR<- ENSEMBLE_occ.wmean.tot1[, c(1,2,4)] |> filter(total>0) |>
+  ltg()+
+  geom_line(data=max.sp_lat , aes(x=latitude,y= count),color="grey70")+
+  labs(x="Latitude (cell midpoint)",color="Species Richness",y="Species Richness")
+SR_UR<- plot.map(ENSEMBLE_occ.wmean.tot1[,c("longitude","latitude","total")] )+labs(color="Species Richness")
+
+sr_patch<- SR_UR + 
+ldg_UR+ theme(legend.position = "none")+
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+sp.importance <- ENSEMBLE_occ.wmean1 |> 
+  group_by(longitude, latitude, ProvId) |> pivot_longer(-c("longitude","latitude","ProvId")) |> drop_na(value) |> filter(value>0)|>
+  group_by(name) |> mutate(N=n()) |> ungroup() |> #mutate(p=N/nrow(grid))
+  mutate(R=value/N)
+
+dt<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(sum = sum(R, na.rm=TRUE), .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+dt1<- sp.importance |> group_by(latitude, longitude, ProvId) |> summarize(n=n(),sum = sum(R, na.rm=TRUE)/n, .groups="keep") |>  ungroup() |> right_join(grid, by = c("latitude", "longitude","ProvId")) |> drop_na(ProvId) |> select(longitude, latitude, sum)|> mutate(sum=scales::rescale(sum))|> drop_na()
+
+
+tot_rarity<- plot.map(dt )+labs(color="Total range-size rarity")
+
+ldg_tot_rarity<- dt  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Total range-size rarity",color="Total range-size rarity")
+
+tot_rarity_patch<- tot_rarity+ theme(legend.position="none") + ldg_tot_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+avrg_rarity<- plot.map(dt1 )+labs(color="Average range-size rarity")
+
+ldg_avrg_rarity<- dt1  |> rename(total=sum) |> 
+  ltg() +labs(x="Latitude (cell midpoint)",y="Average range-size rarity",color="Average range-size rarity")
+
+avrg_rarity_patch<-avrg_rarity+ theme(legend.position="none") + ldg_avrg_rarity+ 
+  plot_layout(widths = c(3.0, 1))+
+  #plot_annotation(tag_levels = 'A')+ 
+  plot_layout(guides = 'collect')
+
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt, by = c("longitude", "latitude")) |> drop_na(sum,total)
+# create classes bi_class
+dim=4
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "total rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_TotRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+dt2D <- full_join(ENSEMBLE_occ.wmean.tot1[, c(1,2,4)],dt1, by = c("longitude", "latitude")) |> drop_na(sum, total)
+# create classes
+
+# before projecting, transform NE_places to data frame to use it inside ggplot()
+NE_places.df <- bi_class(dt2D, x = total, y = sum, style = "quantile", dim = dim)
+names(NE_places.df) <- c("lon", "lat","PROB","PROB1","bi_class")
+NE_places.dt.prj <- data.table(NE_places.df,NE_places.df)
+# Create an sf object from the data frame
+sf_object <- st_as_sf(NE_places.df, coords = c("lon", "lat"), crs = 4326)
+# Transform the coordinates to the desired CRS
+transformed_sf <- st_transform(sf_object, crs = PROJ)
+# Extract the transformed coordinates and convert them to a data frame
+NE_places.df.prj <- as.data.frame(st_coordinates(transformed_sf))
+# Rename the columns
+names(NE_places.df.prj)[1:2] <- c("X.prj", "Y.prj")
+# transform to data.table (easier to work with)
+NE_places.dt.prj <- data.table(NE_places.df.prj,NE_places.df)
+
+
+
+pal= "BlueYl"
+map<- ggplot() +
+  geom_point(data = NE_places.dt.prj, 
+             aes(x = X.prj, y = Y.prj, color=bi_class),size = 1, 
+              show.legend = FALSE) +
+  bi_scale_color(pal = pal, dim = dim) +
+  geom_polygon(data = NE_countries.prj, 
+               aes(long,lat, group = group), 
+               colour = "gray70", fill = "gray90", size = .25) +
+  geom_polygon(data = NE_box.prj, 
+               aes(x = long, y = lat), 
+               colour = "black", fill = "transparent", size = .25) +
+  geom_path(data = NE_graticules.prj, 
+            aes(long, lat, group = group), 
+            linetype = "dotted", colour = "grey50", size = .25) +
+  geom_text(data = lbl.Y.prj, # latitude
+            aes(x = X.prj, y = Y.prj, label = lbl), 
+            colour = "grey50", size = 2) +
+  geom_text(data = lbl.X.prj, # latitude
+            aes(x = X.prj, y = Y.prj*1.04, label = lbl), 
+            colour = "grey50", size = 2) +
+  coord_fixed(ratio = 1) +
+  theme_void() + # remove the default background, gridlines & default gray color around legend's symbols
+  # final theme tweaks
+  theme(legend.title = element_text(colour="black", size=10, face="bold",angle = 90), # adjust legend title
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(-10,-10,-10,-10),
+        #legend.position = c(1.01, 0.25), # relative position of legend
+        plot.margin = unit(c(t=0, r=1, b=0, l=0), unit="cm")
+        ) 
+
+legend <- bi_legend(pal = pal,
+                    dim = dim,
+                    xlab = "species richness",
+                    ylab = "average rarity",
+                    size = 8)+
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank()
+  )
+
+# combine map with legend
+SR_AvrgRar_2D <- 
+  ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.76, .74, 0.3, 0.3)
+
+patch2D <- SR_TotRar_2D + SR_AvrgRar_2D
+
+
+(sr_patch /
+tot_rarity_patch/
+avrg_rarity_patch/
+patch2D) +
+  plot_layout(heights = c(1, 1, 1, 1.5))+ 
+  plot_annotation(tag_levels = 'A')& 
+  theme(plot.tag = element_text("Times New Roman",face = "bold", size = 12,hjust = -3, vjust = 0))
+ggsave("img/FigureS7.png", width=30, height=42, units="cm", dpi=300)
+```
