@@ -21,8 +21,7 @@ This repository contains the code and data used for the analysis and visualizati
   - `fun/theme_Publication.R`: Custom theme for publication-quality plots.
   
 #### Notebooks📒
-- **notebooks/**
-  - `script.Rmd`: Main RMarkdown file containing the analysis and plots.
+- `script.Rmd`: Main RMarkdown file containing the analysis and plots.
 
 #### Outputs🎨
 - **img/**
