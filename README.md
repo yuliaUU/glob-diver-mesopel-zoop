@@ -65,7 +65,8 @@ install.packages(c("readr", "dplyr", "glue", "latex2exp", "sp", "scales", "tidyr
 
 #### Restore the Environment
 
-If you need to set up the environment on a different machine or restore it to a previous state, use the restore function:
+`renv.lock` has a log of all the packages and their version that are required to run the script. If you need to set up the environment on a different machine or restore it to a previous state, use the restore function:
+
 ```r
 renv::restore()
 ```
