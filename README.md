@@ -68,3 +68,6 @@ If you need to set up the environment on a different machine or restore it to a 
 ```r
 renv::restore()
 ```
+## License
+
+This project is covered under the MIT License.
