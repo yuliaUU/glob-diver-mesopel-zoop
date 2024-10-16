@@ -6,7 +6,7 @@ This repository contains the code and data used for the analysis and visualizati
 ## Project Structure💾
 
 #### Data📑
-- **data/**
+- **data/** - available t download: Egorova, Yulia (2024). Data used in the study. figshare. Dataset. [https://doi.org/10.6084/m9.figshare.26360203](https://doi.org/10.6084/m9.figshare.26360203)
   - `GEO.csv`: Contains geographical information.
   - `META_zoop.csv`: Metadata for zooplankton.
   - `ENSEMBLE_occ.wmean.csv`: Species occurrence data.
@@ -18,11 +18,11 @@ This repository contains the code and data used for the analysis and visualizati
 
 #### Scripts📜
 - **scripts/**
+  - `script.Rmd` - run this script to reproduce the results of this study.
   - `fun/theme_Publication.R`: Custom theme for publication-quality plots.
   
 #### Notebooks📒
-- **notebooks/**
-  - `script.Rmd`: Main RMarkdown file containing the analysis and plots.
+- `script.Rmd`: Main RMarkdown file containing the analysis and plots.
 
 #### Outputs🎨
 - **img/**
@@ -65,7 +65,11 @@ install.packages(c("readr", "dplyr", "glue", "latex2exp", "sp", "scales", "tidyr
 
 #### Restore the Environment
 
-If you need to set up the environment on a different machine or restore it to a previous state, use the restore function:
+`renv.lock` has a log of all the packages and their version that are required to run the script. If you need to set up the environment on a different machine or restore it to a previous state, use the restore function:
+
 ```r
 renv::restore()
 ```
+## License
+
+This project is covered under the MIT License.
