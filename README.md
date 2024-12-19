@@ -17,7 +17,6 @@ This repository contains the code and data used for the analysis and visualizati
   - `ENV.RData`: Environmental variables data for mesopelagic zone.
 
 #### Scripts📜
-- **scripts/**
   - `script.Rmd` - run this script to reproduce the results of this study.
   - `fun/theme_Publication.R`: Custom theme for publication-quality plots.
   
